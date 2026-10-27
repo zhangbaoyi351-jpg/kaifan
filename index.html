@@ -16,7 +16,7 @@
 <div class="app">
 <header class="topbar">
   <div class="brand"><div class="logo">🥢</div><div>开饭啦<small>HOME COOKING · MADE SIMPLE</small></div></div>
-  <div class="top-actions"><button class="btn" id="showFavorites">♡ 我的收藏</button><button class="btn primary" id="addRecipeBtn">＋ 添加菜谱</button></div>
+  <div class="top-actions"><button class="btn" id="showFavorites">♡ 我的收藏</button><button class="btn" id="exportBackup">导出备份</button><button class="btn" id="importBackupBtn">导入备份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden><button class="btn primary" id="addRecipeBtn">＋ 添加菜谱</button></div>
 </header>
 <section class="hero">
   <div class="hero-copy"><div class="eyebrow">TODAY, LET'S COOK</div><h1>今天吃什么？<br>好好吃饭就好。</h1><p>把喜欢的家常菜、调料配方和烹饪步骤收进来，让每天做饭更轻松。</p></div>
@@ -32,7 +32,7 @@
   <div class="panel"><h2>🗓️ 今日菜单</h2><p class="sub">选好今天要做的菜，做饭不再临时纠结。</p><div class="menu-items" id="menuItems"></div><div class="panel-foot"><span id="menuCount">还没有安排菜品</span><button class="text-btn" id="clearMenu">清空菜单</button></div></div>
   <div class="panel"><h2>🧺 采购清单</h2><p class="sub">添加到今日菜单后，汇总食材和调料。</p><div class="shopping-items" id="shoppingItems"></div><div class="panel-foot"><span id="shoppingCount">按需勾选已采购食材</span><button class="text-btn" id="resetShopping">重置勾选</button></div></div>
 </section>
-<div class="footer">为家常饭菜留一点从容 · 菜谱可自行添加，数据保存在当前浏览器</div>
+<div class="footer">为家常饭菜留一点从容 · 数据保存在当前浏览器。建议定期导出备份，换设备前记得导入。</div>
 </div>
 <div class="modal-backdrop" id="recipeModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal"><div class="modal-head"><div><h2 id="modalTitle"></h2><p id="modalMeta"></p></div><button class="close" id="closeModal" aria-label="关闭">×</button></div><div class="modal-body" id="modalBody"></div></div></div>
 <div class="modal-backdrop" id="addModal" role="dialog" aria-modal="true" aria-labelledby="addTitle"><div class="modal"><div class="modal-head"><div><h2 id="addTitle">添加一道家常菜</h2><p>把你的拿手菜和调料比例记录下来。</p></div><button class="close" id="closeAdd" aria-label="关闭">×</button></div><div class="modal-body">
@@ -91,6 +91,37 @@ $("filters").addEventListener("click",e=>{const b=e.target.closest("[data-catego
 $("recipeGrid").addEventListener("click",e=>{const f=e.target.closest("[data-fav]");if(f){toggleFavorite(f.dataset.fav);return}const o=e.target.closest("[data-open]");if(o)openRecipe(o.dataset.open);});
 $("searchInput").addEventListener("input",renderRecipes);
 $("showFavorites").onclick=()=>{favoritesOnly=!favoritesOnly;$("showFavorites").textContent=favoritesOnly?"查看全部菜谱":"♡ 我的收藏";if(favoritesOnly)selectedCategory="全部";renderFilters();renderRecipes();document.querySelector("section").scrollIntoView({behavior:"smooth",block:"start"});};
+
+// 数据备份：导出自定义菜谱、收藏、今日菜单和采购勾选状态
+$("exportBackup").onclick=()=>{
+ const data={app:"kaifan",version:1,exportedAt:new Date().toISOString(),customRecipes,favorites:[...favorites],menu,checkedItems:[...checkedItems]};
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json;charset=utf-8"});
+ const url=URL.createObjectURL(blob);const a=document.createElement("a");
+ a.href=url;a.download="kaifan-backup-"+new Date().toISOString().slice(0,10)+".json";
+ document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+};
+$("importBackupBtn").onclick=()=>$("importBackupFile").click();
+$("importBackupFile").addEventListener("change",e=>{
+ const file=e.target.files&&e.target.files[0];if(!file)return;
+ const reader=new FileReader();
+ reader.onload=()=>{
+  try{
+   const data=JSON.parse(String(reader.result||""));
+   const validRecipe=r=>r&&typeof r.id==="string"&&typeof r.name==="string"&&typeof r.category==="string"&&Array.isArray(r.ingredients)&&Array.isArray(r.steps);
+   if(data.app!=="kaifan"||data.version!==1||!Array.isArray(data.customRecipes)||!data.customRecipes.every(validRecipe)||!Array.isArray(data.favorites)||!Array.isArray(data.menu)||!Array.isArray(data.checkedItems))throw new Error("格式不正确");
+   if(!confirm("导入备份会覆盖本浏览器当前的自定义菜谱、收藏、菜单和采购勾选状态。建议先导出当前备份。确定继续吗？"))return;
+   customRecipes=data.customRecipes;favorites=new Set(data.favorites.filter(x=>typeof x==="string"));
+   menu=data.menu.filter(x=>x&&typeof x.id==="string").map(x=>({id:x.id,servings:Math.max(1,Math.min(30,Number(x.servings)||2))}));
+   checkedItems=new Set(data.checkedItems.filter(x=>typeof x==="string"));
+   save("kaifan_custom",customRecipes);save("kaifan_favorites",[...favorites]);save("kaifan_menu",menu);save("kaifan_checked",[...checkedItems]);
+   alert("备份导入成功，页面即将刷新。");location.reload();
+  }catch(err){alert("无法导入该文件。请确认它是由「开饭啦」导出的有效 JSON 备份。");}
+  finally{e.target.value="";}
+ };
+ reader.onerror=()=>{alert("读取文件失败，请重新选择备份文件。");e.target.value="";};
+ reader.readAsText(file);
+});
+
 $("addRecipeBtn").onclick=openAdd;$("closeAdd").onclick=closeAdd;$("cancelAdd").onclick=closeAdd;$("closeModal").onclick=closeModal;
 $("recipeModal").addEventListener("click",e=>{if(e.target===$("recipeModal"))closeModal()});$("addModal").addEventListener("click",e=>{if(e.target===$("addModal"))closeAdd()});
 $("menuItems").addEventListener("click",e=>{const b=e.target.closest("[data-remove-menu]");if(!b)return;menu=menu.filter(x=>x.id!==b.dataset.removeMenu);save("kaifan_menu",menu);renderMenu();});
